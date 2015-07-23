@@ -1,0 +1,183 @@
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+
+library(plyr)
+library(dplyr)
+library(MASS)
+library(caret)
+library(doParallel)
+library(ROCR)
+library(xtable)
+library(rpart)
+library(randomForest)
+library(gbm)
+
+set.seed(12345)
+select <- dplyr::select
+registerDoParallel(cores=8)
+```
+---
+title: "Machine Learning Class Project"
+author: "Alex Heaton"
+date: "July 23, 2015"
+output: html_document
+---
+
+```{r echo=FALSE,warning=FALSE, message=FALSE}
+data <- read.csv("pml-training.csv")
+finalTest <- read.csv("pml-testing.csv")
+
+data = select(data, contains("user_name"), contains("arm"), contains("classe"))
+data <- data[-c(5:15)]; data <- data[-c(14:28)]; data <- data[-c(17:31)];data <- data[-c(18:27)];
+
+finalTest = select(finalTest, contains("user_name"), contains("arm"), contains("problem"))
+finalTest <- finalTest[-c(5:15)]; finalTest <- finalTest[-c(14:28)]; finalTest <- finalTest[-c(17:31)];finalTest <- finalTest[-c(18:27)];
+
+```
+
+```{r echo=FALSE,warning=FALSE, message=FALSE}
+
+# Create the interim training and test data sets for our analysis 
+inTrain <- createDataPartition(y=data$classe,
+                               p=0.70, list=FALSE)
+training <- data[inTrain,]
+testing <- data[-inTrain,]
+
+#Build Table to store results
+modelName <- c('Classification Tree', 'Classification Tree w/ pca',
+               'Random Forest','Random Forest w/ pca', 'Boosted Model', 'Boosted Model w/pca')
+modelMethod <- c('rpart','rpart+pca','rf','rf+pca','gbm','gbm+pca')
+elapsed <- c(1,2,3,4,5,6)
+accuracy <- c(1,2,3,4,5,6)
+df <- data.frame(modelName,modelMethod,elapsed,accuracy)
+
+```
+
+```{r echo=FALSE,warning=FALSE, message=FALSE}
+
+#tree classification model
+if (file.exists("fit.tree.rds")) {fit.tree <- readRDS("fit.tree.rds"); t1 <- readRDS("t1.rds")} else {
+  t1 <- system.time({ fit.tree <- train(classe~.,method="rpart", data=training) })
+}
+
+if (file.exists("fit.tree.pal.rds")) {fit.pca.tree <- readRDS("fit.tree.pda.rds"); t2 <- readRDS("t2.rds")} else {
+  t2 <- system.time({ fit.tree.pca <- train(classe~.,method="rpart", preProcess="pca", data=training) })
+}
+
+```
+
+```{r echo=FALSE,warning=FALSE, message=FALSE}
+
+#random forest model
+if (file.exists("fit.rf.rds")) {fit.rf <- readRDS("fit.rf.rds");  t3 <- readRDS("t3.rds")} else {
+  t3 <- system.time({ fit.rf <- train(classe~.,method="rf", data=training) })
+}
+
+if (file.exists("fit.rf.pca.rds")) {fit.rf.pca <- readRDS("fit.rf.pca.rds"); t4 <- readRDS("t4.rds")} else {
+  t4 <- system.time({ fit.rf.pca <- train(classe~.,method="rf", preProcess="pca", data=training) })
+}
+```
+
+
+```{r echo=FALSE,warning=FALSE, message=FALSE}
+
+#boosted model
+if (file.exists("fit.boost.rds")) {fit.boost <- readRDS("fit.boost.rds"); t5 <- readRDS("t5.rds")} else {
+  t5 <- system.time({ fit.boost <- train(classe~.,method="gbm", data=training,verbose=FALSE) })
+}
+
+if (file.exists("fit.boost.pca.rds")) {fit.boost.pca <- readRDS("fit.boost.pca.rds"); t6 <- readRDS("t6.rds")} else {
+  t6 <- system.time({ fit.boost.pca <- train(classe~.,method="gbm", data=training, verbose=FALSE, preProcess="pca") })}
+```
+
+
+```{r echo=FALSE,warning=FALSE, message=FALSE}
+
+#test tree model
+predictions.tree <- predict(fit.tree,newdata=testing)
+output <- confusionMatrix(predictions.tree,testing$classe)
+df[1,]$accuracy <- output$overall["Accuracy"]
+df[1,]$elapsed <- t1[3]
+
+#test tree model PCA
+predictions.tree.pca <- predict(fit.tree.pca,newdata=testing)
+output <- confusionMatrix(predictions.tree.pca,testing$classe)
+df[2,]$accuracy <- output$overall["Accuracy"]
+df[2,]$elapsed <- t2[3]
+
+```
+
+```{r echo=FALSE,warning=FALSE, message=FALSE}
+
+#random forest model
+predictions.rf <- predict(fit.rf, newdata=testing)
+output <- confusionMatrix(predictions.rf,testing$classe)
+df[3,]$accuracy <- output$overall["Accuracy"]
+df[3,]$elapsed <- t3[3]
+
+#random forest model PCA
+predictions.rf.pca <- predict(fit.rf.pca, newdata=testing)
+output <- confusionMatrix(predictions.rf.pca,testing$classe)
+df[4,]$accuracy <- output$overall["Accuracy"]
+df[4,]$elapsed <- t4[3]
+
+```
+
+```{r echo=FALSE,warning=FALSE, message=FALSE}
+
+#Boosted model
+predictions.boost <- predict(fit.boost, newdata=testing)
+output <- confusionMatrix(predictions.boost,testing$classe)
+df[5,]$accuracy <- output$overall["Accuracy"]
+df[5,]$elapsed <- t5[3]
+
+#Boosted model PCA
+predictions.boost.pca <- predict(fit.boost.pca, newdata=testing)
+output <- confusionMatrix(predictions.boost.pca,testing$classe)
+df[6,]$accuracy <- output$overall["Accuracy"]
+df[6,]$elapsed <- t6[3]
+
+```
+
+##Summary
+This is an exercise to find the find the best model to predict a classification. My approach was to run multiple models, test them on a validation set, and then pick the one with the greatest accuracy against the validation set. I divided the training csv file into 2 groups, 70% for training and 30% for testing. I did not do additional "cross-validation" because the models take so long to run and I believe that many of the models, like random forest, are doing their own cross-validation/resampling internally. I was able to achieve 100% accuracy (20/20) on the testing set.
+
+##About the data
+Originally the CSV file had 160 variables in it. Upon inspection I saw that many of the columns were blank or NA. I still had almost 100 columns and because I was concerned about the time to run the models I wanted to decrease the variables further. Since the data was related to an arm-related exercise I decided to only keep the variables that had the word "arm" or "dumbbell" in them. 
+
+##About My Environment
+I running the experiments in a Windows Server VM running on the Azure cloud. The intensive models, like random forest, were taking many hours to run. I upgraded to an 8 core VM and added the parallel processing code and saw significant improvements. 
+
+##Model selection
+The table below shows the models that I ran, the time to run the model, and the accuracy when validated against the testing set Note, I am refering to the "testing set" that I created for validation, not the final testing of only 20 records. I tried each model with and without the Principal Components pre-processing option to see what effect it had. (I tried more models than this, but these are the ones that I could get to run reliably without errors. ) 
+
+```{r echo=FALSE, results='asis', warning=FALSE, message=FALSE}
+print(xtable(df), type = "html")
+```
+
+##Finalizing the Model
+The Random Forest model was clearly the best model almost 97% accuracy. It also took the longest time to run. In all cases adding the Principle Components decreased the accuracy.
+
+
+##The Final Test
+With a prediction rate of 97% I expected to get 95% to 100% accuracy on the test set. When I ran the model againt the test data set I was able to achieve 100% accuracy (20/20). My main learning is that it is important to try different models because they can have very different accuracy levels. 
+
+Here were my final predictions
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#predict the values of the test set using the random forest model
+predictions.rf <- predict(fit.rf, newdata=finalTest)
+print(predictions.rf)
+
+# pml_write_files = function(x){
+#   n = length(x)
+#   for(i in 1:n){
+#     filename = paste0("problem_id_",i,".txt")
+#     write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+#   }
+#   
+# }
+# 
+# pml_write_files(as.character(predictions.rf ))
+
+```
